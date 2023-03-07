@@ -115,7 +115,7 @@ class Client:
         if isinstance(channels, str):
             channels = [channels]
 
-        with self._redis_client.pubsub() as pubsub:
+        with redis.client.PubSub(redis.ConnectionPool(host=self.host, port=self.port)) as pubsub:
             for channel in channels:
                 pubsub.subscribe(channel)
 
