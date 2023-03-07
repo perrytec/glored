@@ -115,12 +115,12 @@ class Client:
         if isinstance(channels, str):
             channels = [channels]
 
-        pubsub = self._redis_client.pubsub()
-        for channel in channels:
-            pubsub.subscribe(channel)
+        with self._redis_client.pubsub() as pubsub:
+            for channel in channels:
+                pubsub.subscribe(channel)
 
-        for elem in pubsub.listen():
-            yield elem
+            for elem in pubsub.listen():
+                yield elem
 
 
 class AsyncWrapper:
