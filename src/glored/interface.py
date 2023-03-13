@@ -2,7 +2,7 @@
 Redis Interface in charge of connecting to redis and performing the requests
 """
 import queue
-import threading
+from concurrent.futures import ThreadPoolExecutor
 import logging
 
 import redis
@@ -25,7 +25,7 @@ class Client:
     async_worker = None
 
     _redis_client = None
-    _async_initialized = False
+    _executor = None
     _is_online = 0  # -1 offline, 0 not checked, 1 online
 
     def __init__(self, host: str, port: int = 6379):
@@ -34,7 +34,7 @@ class Client:
         self._redis_client = redis.Redis(connection_pool=redis.ConnectionPool(host=host,
                                                                               port=port,
                                                                               socket_timeout=2))
-        self._job_queue = queue.Queue(maxsize=50)
+        self._async_exception_queue = queue.SimpleQueue()
         self.asynchronous = async_wrap(self)
 
     def change_host(self, host: str, port: int = 6379):
@@ -51,31 +51,24 @@ class Client:
                                                                               socket_timeout=2))
 
     def check_async_init(self):
-        if self._async_initialized:
-            if self.async_worker.is_alive():
-                return
-
-            if self._job_queue.qsize() < 10:
-                return
-
-            raise RuntimeError(f'Redis async_worker is not alive and queue is piling up')
-
-        self._async_initialized = True
-        self.async_worker = threading.Thread(target=self._do_async_jobs, daemon=True)
-        self.async_worker.start()
-
-    def _do_async_jobs(self):
-        while True:
-            function, args, kwargs = self._job_queue.get()
-            func = getattr(self, function)
-            func(*args, **kwargs)
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(max_workers=5, thread_name_prefix='glored')
 
     def async_call(self, function, args, kwargs):
-        try:
-            self._job_queue.put((function, args, kwargs), block=False)
-        except queue.Full as _:
-            logger.error(f'Redis interface job queue is full, cant keep inserting elements')
-            raise
+        if not self._async_exception_queue.empty():
+            logger.error('Last async method call got an error, raising now.')
+            raise self._async_exception_queue.get(block=False)
+        func = getattr(self, function)
+        self._executor.submit(self.wrap_async_function(func), *args, **kwargs)
+
+    def wrap_async_function(self, func):
+        def wrapped(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                logger.error(f'Received exception in async call: {e}', exc_info=True)
+                self._async_exception_queue.put(e)
+        return wrapped
 
     def is_online(self):
         if self._is_online == 1:
