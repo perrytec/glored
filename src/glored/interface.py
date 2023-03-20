@@ -2,12 +2,12 @@
 Redis Interface in charge of connecting to redis and performing the requests
 """
 import queue
-from concurrent.futures import ThreadPoolExecutor
+from glored.fast_thread_pool import FastThreadPoolExecutor
 import logging
 
 import redis
 
-logger = logging.getLogger('redis_int')
+logger = logging.getLogger('glored')
 
 
 def only_online(func):
@@ -16,6 +16,16 @@ def only_online(func):
         if self.is_online():
             return func(self, *args, **kwargs)
     return decorator
+
+
+def queue_error(func):
+    def wrapped(self, *args, **kwargs):
+        try:
+            return func(self, *args, **kwargs)
+        except Exception as e:
+            logger.error(f'Received exception in async call: {e}', exc_info=True)
+            self._async_exception_queue.put(e)
+    return wrapped
 
 
 class Client:
@@ -58,17 +68,7 @@ class Client:
         if not self._async_exception_queue.empty():
             logger.error('Last async method call got an error, raising now.')
             raise self._async_exception_queue.get(block=False)
-        func = getattr(self, function)
-        self._executor.submit(self.wrap_async_function(func), *args, **kwargs)
-
-    def wrap_async_function(self, func):
-        def wrapped(*args, **kwargs):
-            try:
-                return func(*args, **kwargs)
-            except Exception as e:
-                logger.error(f'Received exception in async call: {e}', exc_info=True)
-                self._async_exception_queue.put(e)
-        return wrapped
+        self._executor.submit(getattr(self, '_async_' + function), *args, **kwargs)
 
     def is_online(self):
         if self._is_online == 1:
@@ -114,6 +114,17 @@ class Client:
 
             for elem in pubsub.listen():
                 yield elem
+
+    #####################################################
+    # Async calls: Defined a priori to speed up calls
+    #####################################################
+    @queue_error
+    def _async_set(self, *args, **kwargs):
+        return self.set(*args, **kwargs)
+
+    @queue_error
+    def _async_publish(self, *args, **kwargs):
+        return self.publish(*args, **kwargs)
 
 
 class AsyncWrapper:
