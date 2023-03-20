@@ -62,7 +62,7 @@ class Client:
 
     def check_async_init(self):
         if self._executor is None:
-            self._executor = ThreadPoolExecutor(max_workers=5, thread_name_prefix='glored')
+            self._executor = FastThreadPoolExecutor(max_workers=5, thread_name_prefix='glored', max_size=1000)
 
     def async_call(self, function, args, kwargs):
         if not self._async_exception_queue.empty():
