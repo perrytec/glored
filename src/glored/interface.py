@@ -100,6 +100,10 @@ class Client:
         return self._redis_client.set(name, value, **kwargs)
 
     @only_online
+    def setex(self, name, time, value, **kwargs):
+        return self._redis_client.setex(name, time, value, **kwargs)
+
+    @only_online
     def publish(self, channel, message, **kwargs):
         return self._redis_client.publish(channel, message, **kwargs)
 
